@@ -81,15 +81,55 @@ namespace chili
 		*buf = 0;
 		strrev(pStart);
 	}
+
+	int strlen(char const* str)
+	{
+		int count = 0; 
+		for (auto const* it = str; it != nullptr && *it != '\0'; ++it, ++count);
+		return count - 1;
+	}
+
+	char* strcopy(const char* source, char* destination)
+	{
+		if (source == nullptr || destination == nullptr) return nullptr;
+
+		auto* dest_iterator = destination; 
+
+		for (const auto* src_iterator = source; *src_iterator != '\0'; ++src_iterator, ++dest_iterator)
+		{
+			*dest_iterator = *src_iterator; 
+		}
+
+		dest_iterator = '\0';
+
+		return destination; 
+			
+	}
 };
+
 
 class Person
 {
 public:
 
+	Person()
+		:
+		buffer(new char[string_length_max + 1])
+	{}
+	 
+	~Person()
+	{
+		delete[] buffer; 
+	}
+
 	void setString(char* s)
 	{
-		buffer = s;
+		char* dest_iterator = buffer; 
+		for (char const* src_iterator = s; dest_iterator != buffer + string_length_max && *src_iterator != '\0'; ++src_iterator, ++dest_iterator)
+		{
+			*dest_iterator = *src_iterator; 
+		}
+		*dest_iterator = '\0';
 
 	}
 	void setValue(int int_in)
@@ -104,14 +144,94 @@ public:
 	{
 		return value; 
 	}
-	char getBuffer()
+	char const* getBuffer()const
 	{
-		return *buffer;
+		return buffer;
+	}
+	char* getBuffer()
+	{
+		return buffer;
+	}
+	void Serialize(std::ofstream& file)const
+	{
+		file.write(reinterpret_cast<char const*>(&value), sizeof(value));
+		file.write(buffer, string_length_max);
+	}
+	void Deserialize(std::ifstream& file)
+	{
+		file.read(reinterpret_cast<char*>(&value), sizeof(value));
+		file.read(buffer, string_length_max);
 	};
 
 private:
+	static constexpr int string_length_max = 10; 
 	int value = 0;
-	char* buffer;
+	char* buffer = nullptr;
+};
+
+class Database
+{
+public: 
+	void AddPerson(char* name, int age)
+	{
+		persons[num_persons].setString(name);
+		persons[num_persons].setValue(age);
+		progress_saved = false; 
+		++num_persons;
+	}
+	void Serialize()
+	{
+		std::ofstream out("names.dat", std::ios::binary);
+		out.write(reinterpret_cast<const char*>(&num_persons), sizeof(num_persons));
+
+		for (int i = 0; i < num_persons; ++i)
+		{
+			persons[i].Serialize(out);
+		}
+		progress_saved = true; 
+	}
+	bool Deserialize()
+	{
+		std::ifstream in("names.dat", std::ios::binary);
+		if (in.is_open())
+		{
+			num_persons = 0;
+			in.read(reinterpret_cast<char*>(&num_persons), sizeof(num_persons));
+
+			for (int i = 0; i < num_persons; ++i)
+			{
+				persons[i].Deserialize(in);
+			}
+			return true;
+		}
+		return false;
+	}
+	void PrintChart()
+	{
+		for (int i = 0; i < num_persons; i++)
+		{
+			const auto& person = persons[i];
+			chili::print("\n"); 
+			person.printString();
+			chili::print("\t|");
+
+			for (int j = 0; j < person.getValue(); j++)
+			{
+				chili::print("=");
+			}
+		}
+		
+	}
+	bool isSaved()const
+	{
+		return progress_saved;
+	}
+
+private:
+	static constexpr int maxSize = 20; 
+	Person persons[maxSize];
+	int num_persons = 0; 
+	bool progress_saved = false;
 };
 
 enum Options
@@ -126,11 +246,8 @@ enum Options
 
 int main()
 {
-	static constexpr int maxSize = 20;
+	Database dbase;
 	bool IsRunning = true;
-	int IndexPersons = 0;
-	Person persons[20];
-	char NameBufferArray[maxSize][maxSize];
 	char switcher = -1;
 	while (IsRunning)
 	{
@@ -142,64 +259,55 @@ int main()
 		{
 		case Options::Adding:
 		{
-
+			char name_buffer[20]{};
 			chili::print("\nEnter Name:");
-			chili::read(NameBufferArray[IndexPersons], maxSize);
-			persons[IndexPersons].setString(NameBufferArray[IndexPersons]);
-			
+			chili::read(name_buffer, 20);
 
-			char ValBuffer[maxSize];
+			char age_buffer[4]{};
 			chili::print("\nEnter Value:");
-			chili::read(ValBuffer, maxSize);
-			persons[IndexPersons].setValue(chili::str2int(ValBuffer));
+			chili::read(age_buffer, 4);
 
-			++IndexPersons;
-			chili::print("\n");
+			dbase.AddPerson(name_buffer, chili::str2int(age_buffer));
 
 		}
 		break; 
 		case  Options::Printing:
 		{
-			for (int i = 0; i < IndexPersons; i++)
-			{	
-				chili::print("\n");
-				persons[i].printString();
-				chili::print("\t|");
-				for (int j = 0; j < persons[i].getValue(); j++)
-				{
-					chili::print("=");
-				}
-
-			}
+			dbase.PrintChart();
 			chili::print("\n");
 		}
 		break;
 		 
 		case Options::Saving:
 		{
-			std::ofstream out("names.dat", std::ios::binary);
-			
-			out.write(reinterpret_cast<char*>(&persons), sizeof(persons));	
-			
+			dbase.Serialize();
 		}
 		break;
 
 		case Options::Loading:
 		{
-			std::ifstream in("names.dat", std::ios::binary);
-			if (in.is_open()) 
+			if (!dbase.isSaved())
 			{
-				in.read(reinterpret_cast<char*>(persons),sizeof (persons));
+				chili::print("\nProgress will be lost, save first? Y/N: ");
+				char response[2]{};
+				chili::read(response, 2);
+				if (response[0] == 'y' || response[0] == 'Y')
+				{
+					dbase.Serialize();
+					chili::print("\nFile save success!");
+				}
+			}
+			if (dbase.Deserialize())
+			{
 				chili::print("\nloaded File success!");
 			}
 			else
 			{
-				chili::print("\nFailed to load file.");
+				chili::print("\nFile not loaded.");
 			}
-
-			
 		}
 		break;
+		chili::print("\n");
 
 		case  Options::Quitting:
 		{
@@ -207,6 +315,7 @@ int main()
 		}
 		break;
 		}
+		chili::print("\n");
 
 	}
 	return 0;
